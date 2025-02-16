@@ -1,7 +1,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -13,16 +13,9 @@ import dearpygui.dearpygui as dpg
 import time
 import random
 import os
+from urllib.parse import urlparse, parse_qs
 
 toast = ToastNotifier()
-
-# Notificação de Inicialização
-toast.show_toast(
-    "InfernoLinks Searcher",
-    "Round inicializando...",
-    duration=3,
-    icon_path='dante_limbus.ico'
-)
 
 # Configurações do Chrome
 chrome_options = ChromeOptions()
@@ -36,6 +29,11 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--log-level=1")
 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 chrome_options.add_experimental_option("useAutomationExtension", False)
+chrome_options.add_argument("--user-agent=" + random.choice([
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.49 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"
+]))
 
 # Configurações do Firefox
 firefox_options = FirefoxOptions()
@@ -44,22 +42,33 @@ firefox_options.add_argument("--height=1080")
 firefox_options.set_preference("dom.webdriver.enabled", False)
 firefox_options.set_preference("useAutomationExtension", False)
 
-# Função para coletar links
-def collect_links(driver):
-    links = []
-    elements = driver.find_elements(By.TAG_NAME, "a")
-    for element in elements:
-        href = element.get_attribute("href")
-        if href and "https://chat.whatsapp.com/" in href:
-            links.append(href)
+def extract_whatsapp_links(url):
+    if "google.com" in url:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)  # Use apenas o query da URL
+        if "q" in qs:
+            possible_link = qs["q"][0]  # Corrigido para acessar o primeiro elemento
+            if possible_link.startswith("https://chat.whatsapp.com/"):
+                return possible_link
+    return url
 
-    descriptions = driver.find_elements(By.XPATH, "//div[@class='VwiC3b yXK7lf MUxGbd yDYNvb lyLwlc'] | //span[@class='VwiC3b yXK7lf MUxGbd yDYNvb lyLwlc']")
-    for desc in descriptions:
-        text = desc.text
-        if "https://chat.whatsapp.com/" in text:
-            link = "https://chat.whatsapp.com/" + text.split("https://chat.whatsapp.com/")[1].split(" ")[0]
-            links.append(link)
-    return links
+def collect_links_with_titles(driver):
+    results = driver.find_elements(By.XPATH, "//div[@class='yuRUbf']")
+    links_titles = []
+    for result in results:
+        try:
+            a_tag = result.find_element(By.TAG_NAME, "a")  # Use singular
+            href = a_tag.get_attribute("href")
+            try:
+                title = a_tag.find_element(By.TAG_NAME, "h3").text
+            except NoSuchElementException:
+                title = ""
+            if href and "https://chat.whatsapp.com/" in href:
+                whatsapp_link = extract_whatsapp_links(href)
+                links_titles.append((whatsapp_link, title))
+        except NoSuchElementException:
+            continue
+    return links_titles
 
 def generate_unique_filename(base_name):
     counter = 1
@@ -69,7 +78,16 @@ def generate_unique_filename(base_name):
             return file_name
         counter += 1
 
-# Função para iniciar a coleta de links
+def check_captcha(driver):
+    try: 
+        captcha_iframe = driver.find_element(By.XPATH, "//iframe[contains(@src, 'recaptcha')]")
+        if captcha_iframe:
+            dpg.set_value("status_text", "Captcha detectado! Resolva-o e então prossiga com a coleta.")
+            return True
+    except NoSuchElementException:
+        pass
+    return False
+
 def start_collection(sender, app_data):
     navegador_escolhido = ""
     if dpg.get_value("chrome_checkbox"):
@@ -96,7 +114,6 @@ def start_collection(sender, app_data):
         return
 
     start_time = time.time()
-
     driver = None
     if navegador_escolhido == "chrome":
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
@@ -107,7 +124,7 @@ def start_collection(sender, app_data):
         driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
 
     driver.get("https://www.google.com")
-    time.sleep(random.uniform(2, 5))
+    time.sleep(random.uniform(4, 12))  # Aumentado para parecer mais humano
 
     try:
         accept_btn = driver.find_element(By.XPATH, '//button[contains(text(), "Aceitar")]')
@@ -119,7 +136,7 @@ def start_collection(sender, app_data):
     search_box = driver.find_element(By.NAME, "q")
     search_box.send_keys(search_term)
     search_box.send_keys(Keys.RETURN)
-    time.sleep(random.uniform(1, 6))
+    time.sleep(random.uniform(4, 9))
 
     all_links = []
 
@@ -128,45 +145,51 @@ def start_collection(sender, app_data):
         if elapsed_time >= execution_time:
             dpg.set_value("status_text", "Tempo de execução atingido, encerrando a coleta.")
             break
-
-        links = collect_links(driver)
-        all_links.extend(links)
-        dpg.set_value("status_text", f"Encontrados {len(links)} links nesta página.")
+        if check_captcha(driver):
+            continue
+        try:
+            links_titles = collect_links_with_titles(driver)
+            all_links.extend(links_titles)
+            dpg.set_value("status_text", f"Encontrados {len(links_titles)} links nesta página.")
+        except WebDriverException:
+            dpg.set_value("status_text", "Captcha detectado, por favor, resolva-o manualmente.")
+            input("Pressione Enter após resolver o Captcha.")
+            continue
 
         try:
             next_button = driver.find_element(By.ID, "pnnext")
             next_button.click()
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(3, 12))  # Aumentado para parecer mais humano
         except NoSuchElementException:
             dpg.set_value("status_text", "Não há mais páginas, encerrando a coleta.")
             break
-    
+
     file_name = generate_unique_filename("infernolinks_whatsapp")
-    with open(file_name, "w") as file:
-        for link in all_links:
-            file.write(link + "\n")
+    unique_links = list(set(all_links))
+    with open(file_name, "w", encoding="utf-8") as file:
+        for link, title in unique_links:
+            file.write(f"{link} - {title}\n")
 
-    dpg.set_value("status_text", f"Total de links encontrados: {len(all_links)} Salvo em {file_name}")
-
+    dpg.set_value("status_text", f"Total de links encontrados: {len(unique_links)}. Salvo em {file_name}")
     driver.quit()
 
-# Função principal
 def main():
     dpg.create_context()
 
-    with dpg.window(label="InfernoLink Searcher VIP", width=900, height=720):
-        dpg.add_text("Escolha o navegador para iniciar a coleta de Links:")
+    with dpg.window(label="InfernoLinkSearcher", width=820, height=300):
+        dpg.add_text("Escolha o Browser para iniciar a coleta de Links:")
         dpg.add_checkbox(label="Chrome", tag="chrome_checkbox", default_value=False)
         dpg.add_checkbox(label="Brave", tag="brave_checkbox", default_value=False)
         dpg.add_checkbox(label="Firefox", tag="firefox_checkbox", default_value=False)
-        dpg.add_text("Digite o termo de pesquisa:")
-        dpg.add_input_text(tag="search_term_input", hint="Ex: Grupos de Academia WhatsApp", default_value="")
-        dpg.add_text("Digite o tempo de execução (em minutos):")
-        dpg.add_input_text(tag="execution_time_input", hint="Ex: 10 minutos", decimal=True)
-        dpg.add_button(label="Iniciar Coleta", callback=start_collection)
+        dpg.add_text("Digite o termo para a pesquisa:")
+        dpg.add_input_text(tag="search_term_input", hint="Ex: https://chat.whatsapp.com/", default_value="")
+        dpg.add_text("Digite o tempo de execução do Bot (em minutos):")
+        dpg.add_input_text(tag="execution_time_input", hint="Ex: 10", decimal=True)
+        dpg.add_button(label="Iniciar coleta de links", callback=start_collection)
         dpg.add_text("", tag="status_text")
 
-    dpg.create_viewport(title='InfernoLink Searcher VIP', width=900, height=720, small_icon="dante_limbus.ico", large_icon="dante_limbus.ico")
+    dpg.create_viewport(title='InfernoLinkSearcher - Criado por Dante', width=820, height=300,
+                          small_icon='dante_limbus.ico', large_icon='dante_limbus.ico', always_on_top=True)
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.start_dearpygui()
