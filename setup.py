@@ -50,7 +50,7 @@ print(f"✅ Extensão `{zip_file}` empacotada com sucesso!")
 print("🔹 Criando executável com PyInstaller...")
 add_data_flag = ":" if sys.platform != "win32" else ";"
 os.system(
-    f'pyinstaller --onefile --noconsole --icon=dante_limbus.ico --name="InfernusScraper" '
+    f'pyinstaller --onefile --icon=dante_limbus.ico --name="InfernusScraper" '
     f'--add-data="{zip_file}{add_data_flag}scraper/" main.py'
 )
 

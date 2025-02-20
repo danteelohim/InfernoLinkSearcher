@@ -15,6 +15,7 @@ import tempfile
 import shutil
 import sys
 from urllib.parse import urlparse, parse_qs
+import interface.interface as interface  # Importa a UI
 
 EXTENSION_PATH = "C:\\Users\\elohim\\Projekts\\PYTHON\\InfernoLinks\\scraper\\buster_captcha"
 
@@ -31,15 +32,27 @@ if getattr(sys, 'frozen', False):
     from zipfile import ZipFile
 
     base_path = sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
-    extraction_path = os.path.join(os.path.expanduser("~"), "Documents", "captcha_extension")  # Mude para um diretório acessível
+    extraction_path = os.path.join(os.path.expanduser("~"), "Documents", "captcha_extension")  
 
-# Certifique-se de que a pasta de extração existe
+    print(f"🔹 Extraindo extensão para: {extraction_path}")
+
     if not os.path.exists(extraction_path):
-        os.makedirs(extraction_path)
+        os.makedirs(extraction_path, exist_ok=True)
 
-# Abrir e extrair
-    with ZipFile(os.path.join(base_path, "scraper", "buster_captcha.zip"), 'r') as zip_ref:
-        zip_ref.extractall(extraction_path)
+    try:
+        with ZipFile(os.path.join(base_path, "buster_captcha.zip"), 'r') as zip_ref:
+            zip_ref.extractall(extraction_path)
+
+
+        print(f"✅ Extensão extraída com sucesso!")
+        print(f"📂 Arquivos extraídos: {os.listdir(extraction_path)}")
+
+    except Exception as e:
+        print(f"❌ Erro ao extrair a extensão: {e}")
+
+    EXTENSION_PATH = extraction_path
+
+
 
 
 
@@ -55,7 +68,13 @@ def setup_driver(browser):
 
         # Carregar extensão, se existir
         if os.path.exists(EXTENSION_PATH):
+            print(f"🟢 Carregando extensão do caminho: {EXTENSION_PATH}")
             options.add_argument(f"--load-extension={EXTENSION_PATH}")
+            print(f"🟢 Tentando carregar extensão de: {EXTENSION_PATH}")
+
+        else:
+            print(f"🔴 Erro: Extensão não encontrada em {EXTENSION_PATH}")
+
 
         if browser == "brave":
             options.binary_location = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
@@ -117,16 +136,20 @@ def collect_links(driver):
 
 
 def start_scraping(browser, search_term, execution_time):
+
+    
+
+
     """Inicia o processo de scraping para coletar links do WhatsApp."""
-    driver = setup_driver(browser)
+    driver = setup_driver(browser)  
     driver.get("https://www.google.com")
-    time.sleep(random.uniform(2, 5))
+    time.sleep(random.uniform(0.2, 1.3))
 
     # Tenta clicar em aceitar cookies (se aparecer)
     try:
         accept_btn = driver.find_element(By.XPATH, '//button[contains(text(), "Aceitar")]')
         accept_btn.click()
-        time.sleep(random.uniform(0.5, 2))
+        time.sleep(random.uniform(0.3, 1.5))
     except NoSuchElementException:
         pass
 
@@ -134,7 +157,7 @@ def start_scraping(browser, search_term, execution_time):
     search_box = driver.find_element(By.NAME, "q")
     search_box.send_keys(search_term)
     search_box.send_keys(Keys.RETURN)
-    time.sleep(random.uniform(0.9, 2.1))
+    time.sleep(random.uniform(0.9, 1.1))
 
     all_links = []
     start_t = time.time()
@@ -148,15 +171,20 @@ def start_scraping(browser, search_term, execution_time):
         try:
             page_links = collect_links(driver)
             all_links.extend(page_links)
-            print(f"Encontrados {len(page_links)} links nesta página.")
+            status_msg = f"🔍 {len(page_links)} links encontrados nesta página."
+            print(status_msg)
+            # if interface.does_item_exist("status_text"):
+            #     interface.set_value("status_text", status_msg)
+
+
         except Exception as e:
-            print(f"Erro na coleta: {e}")
+            print(f"Erro na coleta: {e} ⚠️")
 
         # Tenta ir para a próxima página
         try:
             next_button = driver.find_element(By.ID, "pnnext")
             next_button.click()
-            time.sleep(random.uniform(0.2, 3))
+            time.sleep(random.uniform(0.2, 1.5))
         except NoSuchElementException:
             print("Não há mais páginas, encerrando a coleta.")
             break
@@ -167,7 +195,7 @@ def start_scraping(browser, search_term, execution_time):
         for link, snippet in set(all_links):
             file.write(f"{link} - {snippet}\n")
 
-    print(f"Total de links encontrados: {len(set(all_links))}. Salvo em {file_name}")
+    print(f"Total de links encontrados: {len(set(all_links))}. Salvo em {file_name} ✅")
     driver.quit()
 
 
